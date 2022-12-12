@@ -1,10 +1,12 @@
 use anyhow::Result;
+use itertools::Itertools;
 use std::collections::HashSet;
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::BufReader;
 use std::time::Instant;
 
+#[derive(Debug)]
 struct Rucksack {
     comp1: HashSet<char>,
     comp2: HashSet<char>,
@@ -16,13 +18,16 @@ impl Rucksack {
         *common_chars.next().unwrap()
     }
 
-    fn priority(&self) -> u8 {
-        let letter = self.common_item();
-        if letter.is_uppercase() {
-            letter as u8 - 38
-        } else {
-            letter as u8 - 96
-        }
+    fn all_items(&self) -> HashSet<char> {
+        self.comp1.union(&self.comp2).map(|c| *c).collect()
+    }
+}
+
+fn priority(letter: char) -> u8 {
+    if letter.is_uppercase() {
+        letter as u8 - 38
+    } else {
+        letter as u8 - 96
     }
 }
 
@@ -46,8 +51,43 @@ fn read_input_part1() -> Result<Vec<Rucksack>> {
     Ok(rucksacks)
 }
 
+fn read_input_part2() -> Result<Vec<Vec<Rucksack>>> {
+    let rucksacks: Vec<Rucksack> = read_input_part1()?;
+
+    let chunked: Vec<Vec<Rucksack>> = rucksacks
+        .into_iter()
+        .chunks(3)
+        .into_iter()
+        .map(|c| c.collect())
+        .collect();
+
+    Ok(chunked)
+}
+
 fn part1(rucksacks: &Vec<Rucksack>) -> u32 {
-    rucksacks.iter().map(|r| r.priority() as u32).sum()
+    rucksacks
+        .iter()
+        .map(|r| priority(r.common_item()) as u32)
+        .sum()
+}
+
+fn part2(rucksacks: &Vec<Vec<Rucksack>>) -> u32 {
+    rucksacks
+        .iter()
+        .map(|group| {
+            let all_items: Vec<HashSet<char>> =
+                group.iter().map(|rucksack| rucksack.all_items()).collect();
+
+            let mut iterator = all_items.into_iter();
+            let first_set = iterator.next().unwrap();
+
+            let common_letters = iterator.fold(first_set, |common, items| {
+                common.intersection(&items).map(|c| *c).collect()
+            });
+            let common_letter: char = *common_letters.iter().next().unwrap();
+            priority(common_letter) as u32
+        })
+        .sum()
 }
 
 fn main() -> Result<()> {
@@ -57,9 +97,9 @@ fn main() -> Result<()> {
     let result1 = part1(&input1);
     println!("part 1 result: {}", result1);
 
-    // let strategy2 = read_input_part2()?;
-    // let result2 = part2(&strategy2);
-    // println!("part 2 result: {}", result2);
+    let input2 = read_input_part2()?;
+    let result2 = part2(&input2);
+    println!("part 2 result: {}", result2);
 
     println!("Finished in {} us", start.elapsed().as_micros());
     Ok(())
