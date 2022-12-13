@@ -1,8 +1,12 @@
 use anyhow::Result;
 use core::panic;
+use std::borrow::Borrow;
+use std::cell::RefCell;
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::BufReader;
+use std::rc::Rc;
+use std::rc::Weak;
 use std::time::Instant;
 
 enum Part {
@@ -15,6 +19,7 @@ enum Input {
     Puzzle,
 }
 
+#[derive(Debug)]
 struct SingleFile {
     name: String,
     size: usize,
@@ -28,15 +33,17 @@ impl SingleFile {
         }
     }
 }
-struct Directory<'a> {
+
+#[derive(Debug)]
+struct Directory {
     name: String,
-    subdirs: Vec<Directory<'a>>,
+    subdirs: Vec<Rc<RefCell<Directory>>>,
     files: Vec<SingleFile>,
-    parent: Option<&'a Directory<'a>>,
+    parent: Option<Weak<RefCell<Directory>>>,
 }
 
-impl<'a> Directory<'a> {
-    fn new(name: &str, parent: Option<&'a Directory>) -> Self {
+impl Directory {
+    fn new(name: &str, parent: Option<Weak<RefCell<Directory>>>) -> Self {
         Directory {
             name: String::from(name),
             subdirs: Vec::new(),
@@ -45,10 +52,10 @@ impl<'a> Directory<'a> {
         }
     }
 
-    fn get_dir(&mut self, name: &str) -> &mut Directory {
-        for dir in &mut self.subdirs {
-            if dir.name == name {
-                return dir;
+    fn get_dir(&self, name: &str) -> Rc<RefCell<Directory>> {
+        for dir in &self.subdirs {
+            if dir.borrow_mut().name == name {
+                return dir.clone();
             }
         }
         panic!()
@@ -56,7 +63,41 @@ impl<'a> Directory<'a> {
 
     fn size(&self) -> usize {
         self.files.iter().map(|f| f.size).sum::<usize>()
-            + self.subdirs.iter().map(|dir| dir.size()).sum::<usize>()
+            + self
+                .subdirs
+                .iter()
+                .map(|dir| dir.borrow_mut().size())
+                .sum::<usize>()
+    }
+
+    fn sum_subdirs_with_size(&self, at_most: usize) -> usize {
+        let mut result = 0;
+        if self.size() <= at_most {
+            result += self.size();
+        }
+        for dir in &self.subdirs {
+            let borrowed = dir.borrow_mut();
+            result += borrowed.sum_subdirs_with_size(at_most);
+        }
+
+        result
+    }
+
+    fn smallest_subdir_with_size(&self, at_least: usize) -> usize {
+        let mut result = usize::MAX;
+
+        let self_size = self.size();
+        if self_size >= at_least && self_size < result {
+            result = self_size;
+        }
+        for dir in &self.subdirs {
+            let borrowed = dir.borrow_mut();
+            let sub_result = borrowed.smallest_subdir_with_size(at_least);
+            if sub_result < result {
+                result = sub_result;
+            }
+        }
+        result
     }
 }
 
@@ -153,47 +194,77 @@ fn solve(part: Part, input: Input) -> Result<usize> {
     let reader = BufReader::new(file);
     let lines: Vec<TerminalLine> = parse_terminal(reader);
 
-    let mut root = Directory::new("root", None);
+    let root = Directory::new("root", None);
+    let root = Rc::new(RefCell::new(root));
 
-    let mut current_dir = &mut root;
-    // let mut current_parent: Option<&Directory> = None;
+    let mut current_dir: Rc<RefCell<Directory>> = root.clone();
 
     for line in lines {
         match line {
             TerminalLine::Input(input) => match input.cmd {
                 Command::Cd => match input.arg {
-                    Argument::Root => current_dir = &mut root,
-                    Argument::Parent => current_dir = unsafe { &mut *current_dir.parent.unwrap() },
-                    Argument::Name(s) => current_dir = current_dir.get_dir(&s),
+                    Argument::Root => current_dir = root.clone(),
+                    Argument::Parent => {
+                        let idk = current_dir
+                            .borrow_mut()
+                            .parent
+                            .as_ref()
+                            .unwrap()
+                            .upgrade()
+                            .unwrap();
+                        current_dir = idk
+                    }
+                    Argument::Name(s) => {
+                        let idk = current_dir.borrow_mut().get_dir(&s).clone();
+                        current_dir = idk
+                    }
                     _ => panic!(),
                 },
                 Command::Ls => (),
             },
             TerminalLine::Output(output) => match output.typ {
-                OutputType::Dir => current_dir
-                    .subdirs
-                    .push(Directory::new(&output.name, Some(current_dir))),
+                OutputType::Dir => {
+                    let mut idk = current_dir.borrow_mut();
+                    let weak = Rc::downgrade(&current_dir);
+                    let new_dir = Directory::new(&output.name, Some(weak));
+                    idk.subdirs.push(Rc::new(RefCell::new(new_dir)))
+                }
                 OutputType::Size(size) => {
-                    current_dir.files.push(SingleFile::new(&output.name, size))
+                    let mut idk = current_dir.borrow_mut();
+                    idk.files.push(SingleFile::new(&output.name, size))
                 }
             },
         }
     }
 
-    panic!()
+    println!("root size: {:?}", root.borrow_mut().size());
+
+    match part {
+        Part::One => {
+            let result = root.borrow_mut().sum_subdirs_with_size(100000);
+            Ok(result)
+        }
+        Part::Two => {
+            let unused = 70_000_000 - root.borrow_mut().size();
+            println!("unused: {:?}", unused);
+            let required = 30_000_000 - unused;
+            let result = root.borrow_mut().smallest_subdir_with_size(required);
+            Ok(result)
+        }
+    }
 }
 
 fn main() -> Result<()> {
     let start = Instant::now();
 
     let test1 = solve(Part::One, Input::Test)?;
-    assert_eq!(test1, 7);
+    assert_eq!(test1, 95437);
 
     let result1 = solve(Part::One, Input::Puzzle)?;
     println!("part 1 result: {}", result1);
 
     let test2 = solve(Part::Two, Input::Test)?;
-    assert_eq!(test2, 19);
+    assert_eq!(test2, 24933642);
 
     let result2 = solve(Part::Two, Input::Puzzle)?;
     println!("part 2 result: {}", result2);
