@@ -15,146 +15,114 @@ enum Input {
     Puzzle,
 }
 
-// Position of head w.r.t. tail
-enum HeadTailConfig {
-    TopLeft,
-    Top,
-    TopRight,
+enum CatchUpMovement {
+    UpLeft,
+    Up,
+    UpRight,
     Left,
-    Overlap,
+    NoMovement,
     Right,
-    BottomLeft,
-    Bottom,
-    BottomRight,
+    DownLeft,
+    Down,
+    DownRight,
+}
+
+#[derive(Debug, Clone)]
+struct Knot {
+    x: usize,
+    y: usize,
 }
 
 #[derive(Debug)]
 struct Grid {
-    width: usize,
-    height: usize,
-    start_x: usize,
-    start_y: usize,
-    head_x: usize,
-    head_y: usize,
-    tail_x: usize,
-    tail_y: usize,
+    knots: Vec<Knot>,
     visited: Vec<Vec<bool>>,
 }
 
 impl Grid {
-    fn current_config(&self) -> HeadTailConfig {
-        let delta_x = self.head_x as i32 - self.tail_x as i32;
-        let delta_y = self.head_y as i32 - self.tail_y as i32;
+    fn get_movement(&self, knot0: usize, knot1: usize) -> CatchUpMovement {
+        let delta_x = self.knots[knot0].x as i32 - self.knots[knot1].x as i32;
+        let delta_y = self.knots[knot0].y as i32 - self.knots[knot1].y as i32;
+
         match (delta_x, delta_y) {
-            (-1, 1) => HeadTailConfig::TopLeft,
-            (0, 1) => HeadTailConfig::Top,
-            (1, 1) => HeadTailConfig::TopRight,
-            (-1, 0) => HeadTailConfig::Left,
-            (0, 0) => HeadTailConfig::Overlap,
-            (1, 0) => HeadTailConfig::Right,
-            (-1, -1) => HeadTailConfig::BottomLeft,
-            (0, -1) => HeadTailConfig::Bottom,
-            (1, -1) => HeadTailConfig::BottomRight,
-            _ => panic!(),
+            (-2, 2) | (-2, 1) | (-1, 2) => CatchUpMovement::UpLeft,
+            (0, 2) => CatchUpMovement::Up,
+            (2, 2) | (2, 1) | (1, 2) => CatchUpMovement::UpRight,
+            (-2, 0) => CatchUpMovement::Left,
+            (2, 0) => CatchUpMovement::Right,
+            (-2, -2) | (-2, -1) | (-1, -2) => CatchUpMovement::DownLeft,
+            (0, -2) => CatchUpMovement::Down,
+            (2, -2) | (2, -1) | (1, -2) => CatchUpMovement::DownRight,
+            _ => CatchUpMovement::NoMovement,
         }
     }
 
-    fn single_step_left(&mut self) {
-        let config = self.current_config();
-        self.head_x -= 1;
-        match config {
-            HeadTailConfig::TopLeft => {
-                self.tail_x -= 1;
-                self.tail_y += 1;
+    fn update_knot(&mut self, knot: usize, movement: CatchUpMovement) {
+        match movement {
+            CatchUpMovement::UpLeft => {
+                self.knots[knot].x -= 1;
+                self.knots[knot].y += 1;
             }
-            HeadTailConfig::Left => self.tail_x -= 1,
-            HeadTailConfig::BottomLeft => {
-                self.tail_x -= 1;
-                self.tail_y -= 1;
+            CatchUpMovement::Up => self.knots[knot].y += 1,
+            CatchUpMovement::UpRight => {
+                self.knots[knot].x += 1;
+                self.knots[knot].y += 1;
             }
-            _ => (),
+            CatchUpMovement::Left => self.knots[knot].x -= 1,
+            CatchUpMovement::NoMovement => (),
+            CatchUpMovement::Right => self.knots[knot].x += 1,
+            CatchUpMovement::DownLeft => {
+                self.knots[knot].x -= 1;
+                self.knots[knot].y -= 1;
+            }
+            CatchUpMovement::Down => self.knots[knot].y -= 1,
+            CatchUpMovement::DownRight => {
+                self.knots[knot].x += 1;
+                self.knots[knot].y -= 1;
+            }
         }
     }
-    fn single_step_right(&mut self) {
-        let config = self.current_config();
-        self.head_x += 1;
-        match config {
-            HeadTailConfig::TopRight => {
-                self.tail_x += 1;
-                self.tail_y += 1;
-            }
-            HeadTailConfig::Right => self.tail_x += 1,
-            HeadTailConfig::BottomRight => {
-                self.tail_x += 1;
-                self.tail_y -= 1;
-            }
-            _ => (),
+
+    fn update_knots(&mut self) {
+        for i in 1..self.knots.len() {
+            let mov = self.get_movement(i - 1, i);
+            self.update_knot(i, mov)
         }
-    }
-    fn single_step_up(&mut self) {
-        let config = self.current_config();
-        self.head_y += 1;
-        match config {
-            HeadTailConfig::TopLeft => {
-                self.tail_x -= 1;
-                self.tail_y += 1;
-            }
-            HeadTailConfig::Top => self.tail_y += 1,
-            HeadTailConfig::TopRight => {
-                self.tail_x += 1;
-                self.tail_y += 1;
-            }
-            _ => (),
-        }
-    }
-    fn single_step_down(&mut self) {
-        let config = self.current_config();
-        self.head_y -= 1;
-        match config {
-            HeadTailConfig::BottomLeft => {
-                self.tail_x -= 1;
-                self.tail_y -= 1;
-            }
-            HeadTailConfig::Bottom => self.tail_y -= 1,
-            HeadTailConfig::BottomRight => {
-                self.tail_x += 1;
-                self.tail_y -= 1;
-            }
-            _ => (),
-        }
+        self.mark_visited();
     }
 
     fn execute_instruction(&mut self, instr: Instruction) {
         match instr {
             Instruction::Left(n) => {
                 for _ in 0..n {
-                    self.single_step_left();
-                    self.mark_visited();
+                    self.knots[0].x -= 1;
+                    self.update_knots();
                 }
             }
             Instruction::Right(n) => {
                 for _ in 0..n {
-                    self.single_step_right();
-                    self.mark_visited();
+                    self.knots[0].x += 1;
+                    self.update_knots();
                 }
             }
             Instruction::Up(n) => {
                 for _ in 0..n {
-                    self.single_step_up();
-                    self.mark_visited();
+                    self.knots[0].y += 1;
+                    self.update_knots();
                 }
             }
             Instruction::Down(n) => {
                 for _ in 0..n {
-                    self.single_step_down();
-                    self.mark_visited();
+                    self.knots[0].y -= 1;
+                    self.update_knots();
                 }
             }
         }
     }
 
     fn mark_visited(&mut self) {
-        self.visited[self.tail_y][self.tail_x] = true;
+        let tail = self.knots.last().unwrap();
+        self.visited[tail.y][tail.x] = true;
     }
 
     fn count_visited(&self) -> usize {
@@ -229,26 +197,34 @@ fn solve(part: Part, input: Input) -> Result<usize> {
 
     let visited = vec![vec![false; width]; height];
 
-    let mut grid = Grid {
-        width: width,
-        height: height,
-        start_x: start_x,
-        start_y: start_y,
-        head_x: start_x,
-        head_y: start_y,
-        tail_x: start_x,
-        tail_y: start_y,
-        visited: visited,
+    let head = Knot {
+        x: start_x,
+        y: start_y,
     };
+    let tail = Knot {
+        x: start_x,
+        y: start_y,
+    };
+
+    let knots = match part {
+        Part::One => vec![head, tail],
+        Part::Two => {
+            let mut knots = Vec::new();
+            knots.push(head);
+            for _ in 0..9 {
+                knots.push(tail.clone());
+            }
+            knots
+        }
+    };
+
+    let mut grid = Grid { knots, visited };
 
     for instr in instructions {
         grid.execute_instruction(instr);
     }
 
-    let result = match part {
-        Part::One => grid.count_visited(),
-        Part::Two => 42,
-    };
+    let result = grid.count_visited();
 
     Ok(result)
 }
@@ -263,7 +239,7 @@ fn main() -> Result<()> {
     println!("part 1 result: {}", result1);
 
     let test2 = solve(Part::Two, Input::Test)?;
-    assert_eq!(test2, 8);
+    assert_eq!(test2, 1);
 
     let result2 = solve(Part::Two, Input::Puzzle)?;
     println!("part 2 result: {}", result2);
