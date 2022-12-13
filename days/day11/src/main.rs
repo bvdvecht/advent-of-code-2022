@@ -23,6 +23,7 @@ struct Monkey {
     test: Box<dyn Fn(u64) -> usize>,
     inspect_count: u64,
     part: Part,
+    part2_keep_value_low: Option<Box<dyn Fn(u64) -> u64>>,
 }
 
 impl fmt::Debug for Monkey {
@@ -36,10 +37,13 @@ impl fmt::Debug for Monkey {
 impl Monkey {
     fn inspect(&mut self, index: usize) -> usize {
         self.inspect_count += 1;
-        println!("current value: {}", self.items[index]);
+        // println!("current value: {}", self.items[index]);
         self.items[index] = (self.operation)(self.items[index]);
-        if let Part::One = self.part {
-            self.items[index] /= 3;
+        match self.part {
+            Part::One => self.items[index] /= 3,
+            Part::Two => {
+                self.items[index] = (self.part2_keep_value_low.as_ref().unwrap())(self.items[index])
+            }
         }
         (self.test)(self.items[index])
     }
@@ -80,6 +84,9 @@ fn solve(part: Part, input: Input) -> Result<u64> {
         Input::Puzzle => File::open("input.txt")?,
     };
     let reader = BufReader::new(file);
+
+    let mut all_divs: Vec<u64> = Vec::new();
+
     let mut monkeys: Vec<Monkey> = reader
         .lines()
         .map(|line| line.unwrap())
@@ -105,6 +112,7 @@ fn solve(part: Part, input: Input) -> Result<u64> {
 
             let test_div = iter.next().unwrap().split("by ").collect::<Vec<&str>>()[1];
             let test_div: u64 = test_div.parse().unwrap();
+            all_divs.push(test_div);
             let true_receiver = iter.next().unwrap().split("monkey ").collect::<Vec<&str>>()[1];
             let true_receiver: usize = true_receiver.parse().unwrap();
             let false_receiver = iter.next().unwrap().split("monkey ").collect::<Vec<&str>>()[1];
@@ -123,18 +131,33 @@ fn solve(part: Part, input: Input) -> Result<u64> {
                 test,
                 inspect_count: 0,
                 part: part.clone(),
+                part2_keep_value_low: None, // will be set later
             }
         })
         .collect();
 
+    // not technically LCM but good enough
+    let mut iterator = all_divs.into_iter();
+    let first_div = iterator.next().unwrap();
+    let lcm = iterator.fold(first_div, |product, next_div| product * next_div);
+
+    for monkey in &mut monkeys {
+        monkey.part2_keep_value_low = Some(Box::new(move |x: u64| -> u64 { x % lcm }));
+    }
+
     println!("before round 1:");
     println!("{:?}", monkeys);
 
-    for _ in 0..20 {
+    let num_rounds = match part {
+        Part::One => 20,
+        Part::Two => 10000,
+    };
+
+    for _ in 0..num_rounds {
         round(&mut monkeys);
     }
 
-    println!("after round 20:");
+    println!("after all rounds:");
     println!("{:?}", monkeys);
 
     for i in 0..monkeys.len() {
@@ -163,7 +186,7 @@ fn main() -> Result<()> {
     println!("part 1 result: {}", result1);
 
     let test2 = solve(Part::Two, Input::Test)?;
-    assert_eq!(test2, 13140);
+    assert_eq!(test2, 2713310158);
 
     let result2 = solve(Part::Two, Input::Puzzle)?;
     println!("part 2 result: {}", result2);
